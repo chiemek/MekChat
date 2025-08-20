@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, User, Phone, Mail, UserPlus, Contacts } from 'lucide-react';
+import { X, User, Phone, Mail, UserPlus, Contact as Contacts } from 'lucide-react';
 import { contactService, ContactRequest } from '../services/contactService';
 
 interface AddContactModalProps {
