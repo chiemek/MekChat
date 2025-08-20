@@ -2,13 +2,51 @@ import React, { useState, useEffect } from 'react';
 import { ResponsiveLayout } from './components/ResponsiveLayout';
 import { ThemeProvider } from './context/ThemeContext';
 import { ChatProvider } from './context/ChatContext';
+import { AuthModal } from './components/AuthModal';
+import { authService, User as UserType } from './services/authService';
 
 function App() {
+  const [currentUser, setCurrentUser] = useState<UserType | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
   const [activeCall, setActiveCall] = useState<{
     type: 'audio' | 'video';
     contact: any;
     status: 'calling' | 'connected' | 'ended';
   } | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = authService.onAuthChange((user) => {
+      setCurrentUser(user);
+      setShowAuth(!user);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  if (!currentUser) {
+    return (
+      <ThemeProvider>
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-white mb-4">ChatFlow</h1>
+            <p className="text-white/70 mb-8">Ultra Modern Chat Experience</p>
+            <button
+              onClick={() => setShowAuth(true)}
+              className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl text-white font-medium transition-all"
+            >
+              Get Started
+            </button>
+          </div>
+          
+          <AuthModal
+            isOpen={showAuth}
+            onClose={() => setShowAuth(false)}
+            onSuccess={() => setShowAuth(false)}
+          />
+        </div>
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider>
@@ -18,6 +56,8 @@ function App() {
             <ResponsiveLayout 
               activeCall={activeCall}
               setActiveCall={setActiveCall}
+              currentUser={currentUser}
+              onUserUpdate={setCurrentUser}
             />
           </div>
         </div>

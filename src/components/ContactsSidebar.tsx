@@ -1,17 +1,25 @@
 import React, { useState } from 'react';
-import { Search, Phone, Video, Settings, Moon, Sun, Plus } from 'lucide-react';
+import { Search, Phone, Video, Settings, Moon, Sun, Plus, User } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
 import { useTheme } from '../context/ThemeContext';
+import { AddContactModal } from './AddContactModal';
+import { ProfileModal } from './ProfileModal';
+import { authService, User as UserType } from '../services/authService';
 
 interface ContactsSidebarProps {
   onCall: (call: { type: 'audio' | 'video'; contact: any; status: 'calling' }) => void;
   onContactSelect?: () => void;
+  currentUser: UserType | null;
+  onUserUpdate: (user: UserType) => void;
 }
 
-export function ContactsSidebar({ onCall, onContactSelect }: ContactsSidebarProps) {
+export function ContactsSidebar({ onCall, onContactSelect, currentUser, onUserUpdate }: ContactsSidebarProps) {
   const { contacts, activeContact, setActiveContact } = useChat();
   const { isDark, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [contactsRefresh, setContactsRefresh] = useState(0);
 
   const filteredContacts = contacts.filter(contact =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -35,12 +43,15 @@ export function ContactsSidebar({ onCall, onContactSelect }: ContactsSidebarProp
           <div className="flex items-center gap-2">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+              className="p-1.5 lg:p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
             >
-              {isDark ? <Sun className="w-5 h-5 text-white" /> : <Moon className="w-5 h-5 text-white" />}
+              {isDark ? <Sun className="w-4 h-4 lg:w-5 lg:h-5 text-white" /> : <Moon className="w-4 h-4 lg:w-5 lg:h-5 text-white" />}
             </button>
-            <button className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
-              <Settings className="w-5 h-5 text-white" />
+            <button 
+              onClick={() => setShowProfile(true)}
+              className="p-1.5 lg:p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+            >
+              <User className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
             </button>
           </div>
         </div>
@@ -134,10 +145,32 @@ export function ContactsSidebar({ onCall, onContactSelect }: ContactsSidebarProp
 
       <div className="p-4 border-t border-white/10">
         <button className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl text-white font-medium hover:from-purple-700 hover:to-pink-700 transition-all">
+        <button 
+          onClick={() => setShowAddContact(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl text-white font-medium hover:from-purple-700 hover:to-pink-700 transition-all"
+        >
           <Plus className="w-4 h-4" />
           New Chat
         </button>
       </div>
+
+      <AddContactModal
+        isOpen={showAddContact}
+        onClose={() => setShowAddContact(false)}
+        onContactAdded={() => {
+          setContactsRefresh(prev => prev + 1);
+          setShowAddContact(false);
+        }}
+      />
+
+      {currentUser && (
+        <ProfileModal
+          isOpen={showProfile}
+          onClose={() => setShowProfile(false)}
+          user={currentUser}
+          onUserUpdate={onUserUpdate}
+        />
+      )}
     </div>
   );
 }

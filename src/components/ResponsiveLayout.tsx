@@ -3,13 +3,16 @@ import { Menu, X } from 'lucide-react';
 import { ContactsSidebar } from './ContactsSidebar';
 import { ChatInterface } from './ChatInterface';
 import { CallInterface } from './CallInterface';
+import { authService, User as UserType } from '../services/authService';
 
 interface ResponsiveLayoutProps {
   activeCall: any;
   setActiveCall: (call: any) => void;
+  currentUser: UserType | null;
+  onUserUpdate: (user: UserType) => void;
 }
 
-export function ResponsiveLayout({ activeCall, setActiveCall }: ResponsiveLayoutProps) {
+export function ResponsiveLayout({ activeCall, setActiveCall, currentUser, onUserUpdate }: ResponsiveLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
@@ -47,6 +50,8 @@ export function ResponsiveLayout({ activeCall, setActiveCall }: ResponsiveLayout
           <ContactsSidebar 
             onCall={setActiveCall}
             onContactSelect={() => setIsSidebarOpen(false)}
+            currentUser={currentUser}
+            onUserUpdate={onUserUpdate}
           />
         </div>
 

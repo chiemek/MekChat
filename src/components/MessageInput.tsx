@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Send, Mic, MicOff, Image, Video, Smile, Paperclip } from 'lucide-react';
+import { Send, Mic, MicOff, Image, Video, Smile } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
 import { EmojiPicker } from './EmojiPicker';
+import { cloudinaryService } from '../services/cloudinaryService';
 
 export function MessageInput() {
   const { addMessage, isRecording, startRecording, stopRecording, handleTyping } = useChat();
@@ -73,13 +74,25 @@ export function MessageInput() {
     
     const audioBlob = await stopRecording();
     if (audioBlob) {
-      const audioUrl = URL.createObjectURL(audioBlob);
-      addMessage({
-        type: 'voice',
-        content: audioUrl,
-        sender: 'me',
-        duration: recordingTime
-      });
+      try {
+        const result = await cloudinaryService.uploadAudio(audioBlob);
+        addMessage({
+          type: 'voice',
+          content: result.secure_url,
+          sender: 'me',
+          duration: recordingTime
+        });
+      } catch (error) {
+        console.error('Failed to upload audio:', error);
+        // Fallback to local URL
+        const audioUrl = URL.createObjectURL(audioBlob);
+        addMessage({
+          type: 'voice',
+          content: audioUrl,
+          sender: 'me',
+          duration: recordingTime
+        });
+      }
     }
     setRecordingTime(0);
   };
@@ -87,6 +100,22 @@ export function MessageInput() {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      handleImageUpload(file);
+    }
+  };
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      const result = await cloudinaryService.uploadImage(file);
+      addMessage({
+        type: 'image',
+        content: result.secure_url,
+        sender: 'me',
+        fileName: file.name
+      });
+    } catch (error) {
+      console.error('Failed to upload image:', error);
+      // Fallback to local URL
       const imageUrl = URL.createObjectURL(file);
       addMessage({
         type: 'image',
@@ -100,6 +129,22 @@ export function MessageInput() {
   const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
+      handleVideoUploadToCloud(file);
+    }
+  };
+
+  const handleVideoUploadToCloud = async (file: File) => {
+    try {
+      const result = await cloudinaryService.uploadVideo(file);
+      addMessage({
+        type: 'video',
+        content: result.secure_url,
+        sender: 'me',
+        fileName: file.name
+      });
+    } catch (error) {
+      console.error('Failed to upload video:', error);
+      // Fallback to local URL
       const videoUrl = URL.createObjectURL(file);
       addMessage({
         type: 'video',
@@ -131,37 +176,37 @@ export function MessageInput() {
       )}
 
       <div className="flex items-end gap-3">
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
           <textarea
             value={message}
             onChange={handleMessageChange}
             onKeyPress={handleKeyPress}
             placeholder="Type a message..."
             rows={1}
-            className="w-full px-4 py-3 pr-20 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none transition-all backdrop-blur-sm"
+            className="w-full px-4 py-3 pr-24 lg:pr-20 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none transition-all backdrop-blur-sm"
             style={{ minHeight: '48px', maxHeight: '120px' }}
           />
           
-          <div className="absolute right-2 top-2 flex items-center gap-1">
+          <div className="absolute right-1 top-1 flex items-center gap-0.5 lg:gap-1">
             <button
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-1.5 lg:p-2 rounded-full hover:bg-white/10 transition-colors"
             >
-              <Smile className="w-5 h-5 text-white/70" />
+              <Smile className="w-4 h-4 lg:w-5 lg:h-5 text-white/70" />
             </button>
             
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-1.5 lg:p-2 rounded-full hover:bg-white/10 transition-colors"
             >
-              <Image className="w-5 h-5 text-white/70" />
+              <Image className="w-4 h-4 lg:w-5 lg:h-5 text-white/70" />
             </button>
             
             <button
               onClick={() => videoInputRef.current?.click()}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-1.5 lg:p-2 rounded-full hover:bg-white/10 transition-colors"
             >
-              <Video className="w-5 h-5 text-white/70" />
+              <Video className="w-4 h-4 lg:w-5 lg:h-5 text-white/70" />
             </button>
           </div>
 
@@ -174,29 +219,29 @@ export function MessageInput() {
 
         <button
           onClick={isRecording ? handleStopRecording : handleStartRecording}
-          className={`p-3 rounded-full transition-all duration-200 ${
+          className={`p-2.5 lg:p-3 rounded-full transition-all duration-200 ${
             isRecording
               ? 'bg-red-500 hover:bg-red-600 scale-110'
               : 'bg-white/10 hover:bg-white/20'
           }`}
         >
           {isRecording ? (
-            <MicOff className="w-5 h-5 text-white" />
+            <MicOff className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
           ) : (
-            <Mic className="w-5 h-5 text-white" />
+            <Mic className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
           )}
         </button>
 
         <button
           onClick={handleSendMessage}
           disabled={!message.trim()}
-          className={`p-3 rounded-full transition-all duration-200 ${
+          className={`p-2.5 lg:p-3 rounded-full transition-all duration-200 ${
             message.trim()
               ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 scale-100'
               : 'bg-white/10 scale-95 opacity-50'
           }`}
         >
-          <Send className="w-5 h-5 text-white" />
+          <Send className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
         </button>
       </div>
 
