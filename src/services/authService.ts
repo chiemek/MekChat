@@ -1,3 +1,25 @@
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut,
+} from "firebase/auth";
+
+const firebaseConfig = {
+  // Replace with your Firebase config
+  apiKey: "your-api-key",
+  authDomain: "your-auth-domain",
+  projectId: "your-project-id",
+  storageBucket: "your-storage-bucket",
+  messagingSenderId: "your-messaging-sender-id",
+  appId: "your-app-id",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
 export interface User {
   id: string;
   email: string;
@@ -6,7 +28,7 @@ export interface User {
   avatar?: string;
   bio?: string;
   phone?: string;
-  status: 'online' | 'offline' | 'away';
+  status: "online" | "offline" | "away";
   lastSeen?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -17,102 +39,36 @@ export interface LoginCredentials {
   password: string;
 }
 
-export interface RegisterData {
-  email: string;
-  username: string;
-  displayName: string;
-  password: string;
-  phone?: string;
-}
-
 class AuthService {
-  private currentUser: User | null = null;
-  private authListeners: ((user: User | null) => void)[] = [];
-
-  constructor() {
-    // Check for existing session
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-      this.currentUser = JSON.parse(savedUser);
-    }
+  async login(email: string, password: string) {
+    const result = await signInWithEmailAndPassword(auth, email, password);
+    return this.transformUser(result.user);
   }
 
-  async login(credentials: LoginCredentials): Promise<User> {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const user: User = {
-      id: 'current-user-' + Date.now(),
-      email: credentials.email,
-      username: credentials.email.split('@')[0],
-      displayName: credentials.email.split('@')[0],
-      avatar: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=150',
-      status: 'online',
-      createdAt: new Date(),
-      updatedAt: new Date()
+  async register(email: string, password: string, name: string) {
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    // Add user profile data
+    return this.transformUser(result.user);
+  }
+
+  async logout() {
+    await signOut(auth);
+  }
+
+  onAuthStateChange(callback: (user: User | null) => void) {
+    return onAuthStateChanged(auth, (user) => {
+      callback(user ? this.transformUser(user) : null);
+    });
+  }
+
+  private transformUser(firebaseUser: any): User {
+    return {
+      id: firebaseUser.uid,
+      name: firebaseUser.displayName || "Anonymous",
+      email: firebaseUser.email,
+      avatar: firebaseUser.photoURL || "",
+      status: "online",
     };
-
-    this.currentUser = user;
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    this.notifyAuthListeners();
-    return user;
-  }
-
-  async register(data: RegisterData): Promise<User> {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const user: User = {
-      id: 'user-' + Date.now(),
-      email: data.email,
-      username: data.username,
-      displayName: data.displayName,
-      phone: data.phone,
-      avatar: 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=150',
-      status: 'online',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    this.currentUser = user;
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    this.notifyAuthListeners();
-    return user;
-  }
-
-  async updateProfile(updates: Partial<User>): Promise<User> {
-    if (!this.currentUser) throw new Error('Not authenticated');
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    this.currentUser = { ...this.currentUser, ...updates, updatedAt: new Date() };
-    localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
-    this.notifyAuthListeners();
-    return this.currentUser;
-  }
-
-  async logout(): Promise<void> {
-    this.currentUser = null;
-    localStorage.removeItem('currentUser');
-    this.notifyAuthListeners();
-  }
-
-  getCurrentUser(): User | null {
-    return this.currentUser;
-  }
-
-  onAuthChange(callback: (user: User | null) => void) {
-    this.authListeners.push(callback);
-    callback(this.currentUser);
-    
-    return () => {
-      this.authListeners = this.authListeners.filter(listener => listener !== callback);
-    };
-  }
-
-  private notifyAuthListeners() {
-    this.authListeners.forEach(listener => listener(this.currentUser));
   }
 }
 

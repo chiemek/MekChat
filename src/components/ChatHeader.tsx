@@ -1,10 +1,13 @@
-import React from 'react';
-import { Phone, Video, MoreVertical } from 'lucide-react';
-import { Contact } from '../context/ChatContext';
+import { Phone, Video, MoreVertical } from "lucide-react";
+import { Contact } from "../context/ChatContext";
 
 interface ChatHeaderProps {
   contact: Contact;
-  onCall: (call: { type: 'audio' | 'video'; contact: Contact; status: 'calling' }) => void;
+  onCall: (call: {
+    type: "audio" | "video";
+    contact: Contact;
+    status: "calling";
+  }) => void;
 }
 
 export function ChatHeader({ contact, onCall }: ChatHeaderProps) {
@@ -12,8 +15,8 @@ export function ChatHeader({ contact, onCall }: ChatHeaderProps) {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    
-    if (hours < 1) return 'Just now';
+
+    if (hours < 1) return "Just now";
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   };
@@ -30,39 +33,42 @@ export function ChatHeader({ contact, onCall }: ChatHeaderProps) {
             />
             <div
               className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
-                contact.status === 'online'
-                  ? 'bg-green-500'
-                  : contact.status === 'away'
-                  ? 'bg-yellow-500'
-                  : 'bg-gray-500'
+                contact.status === "online"
+                  ? "bg-green-500"
+                  : contact.status === "away"
+                  ? "bg-yellow-500"
+                  : "bg-gray-500"
               }`}
             />
           </div>
-          
+
           <div>
             <h2 className="font-semibold text-white">{contact.name}</h2>
             <p className="text-sm text-white/60">
               {contact.isTyping
-                ? 'typing...'
-                : contact.status === 'online'
-                ? 'Online'
+                ? "typing..."
+                : contact.status === "online"
+                ? "Online"
                 : contact.lastSeen
                 ? `Last seen ${formatLastSeen(contact.lastSeen)}`
-                : 'Offline'
-              }
+                : "Offline"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => onCall({ type: 'audio', contact, status: 'calling' })}
+            onClick={() =>
+              onCall({ type: "audio", contact, status: "calling" })
+            }
             className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
           >
             <Phone className="w-5 h-5 text-white" />
           </button>
           <button
-            onClick={() => onCall({ type: 'video', contact, status: 'calling' })}
+            onClick={() =>
+              onCall({ type: "video", contact, status: "calling" })
+            }
             className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
           >
             <Video className="w-5 h-5 text-white" />

@@ -1,27 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { ResponsiveLayout } from './components/ResponsiveLayout';
-import { ThemeProvider } from './context/ThemeContext';
-import { ChatProvider } from './context/ChatContext';
-import { AuthModal } from './components/AuthModal';
-import { authService, User as UserType } from './services/authService';
+import React, { useState, useEffect } from "react";
+import { ResponsiveLayout } from "./components/ResponsiveLayout";
+import { ThemeProvider } from "./context/ThemeContext";
+import { ChatProvider } from "./context/ChatContext";
+import { AuthModal } from "./components/AuthModal";
+import { authService, User as UserType } from "./services/authService";
+import { AuthProvider } from "./context/AuthContext";
+import { useAuth } from "./context/AuthContext";
 
+interface Call {
+  type: "audio" | "video";
+  contact: UserType; // Replace 'any' with proper type
+  status: "calling" | "connected" | "ended";
+}
 function App() {
-  const [currentUser, setCurrentUser] = useState<UserType | null>(null);
   const [showAuth, setShowAuth] = useState(false);
-  const [activeCall, setActiveCall] = useState<{
-    type: 'audio' | 'video';
-    contact: any;
-    status: 'calling' | 'connected' | 'ended';
-  } | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = authService.onAuthChange((user) => {
-      setCurrentUser(user);
-      setShowAuth(!user);
-    });
-
-    return unsubscribe;
-  }, []);
+  const [activeCall, setActiveCall] = useState<Call | null>(null);
 
   if (!currentUser) {
     return (
@@ -37,7 +30,7 @@ function App() {
               Get Started
             </button>
           </div>
-          
+
           <AuthModal
             isOpen={showAuth}
             onClose={() => setShowAuth(false)}
@@ -49,20 +42,22 @@ function App() {
   }
 
   return (
-    <ThemeProvider>
-      <ChatProvider>
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-          <div className="max-w-7xl mx-auto">
-            <ResponsiveLayout 
-              activeCall={activeCall}
-              setActiveCall={setActiveCall}
-              currentUser={currentUser}
-              onUserUpdate={setCurrentUser}
-            />
+    <AuthProvider>
+      <ThemeProvider>
+        <ChatProvider>
+          <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+            <div className="max-w-7xl mx-auto">
+              <ResponsiveLayout
+                activeCall={activeCall}
+                setActiveCall={setActiveCall}
+                currentUser={currentUser}
+                onUserUpdate={setCurrentUser}
+              />
+            </div>
           </div>
-        </div>
-      </ChatProvider>
-    </ThemeProvider>
+        </ChatProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 
