@@ -13,36 +13,14 @@ interface Call {
   status: "connecting" | "connected" | "ended";
 }
 
-interface CallInterfaceProps {
-  call: Call;
-  onEndCall: () => void;
-  onUpdateCall: (call: Call) => void;
-}
-
-interface ChatInterfaceProps {
-  onCall: (call: Call | null) => void;
-  activeChatRoom?: ChatRoom | null;
-  currentUser?: UserType;
-}
-
-interface SidebarProps {
-  chatRooms: ChatRoom[];
-  activeChatRoom: ChatRoom | null;
-  onSelectChatRoom: (chatRoom: ChatRoom) => void;
-  currentUser: UserType;
-  isConnected: boolean;
-  isLoading?: boolean;
-  error?: string | null;
-}
 interface ResponsiveLayoutProps {
   activeCall: Call | null;
   setActiveCall: (call: Call | null) => void;
   currentUser: UserType | null;
-  onUserUpdate: (user: UserType) => void;
 }
 
 export const ResponsiveLayout: FC<ResponsiveLayoutProps> = memo(
-  ({ activeCall, setActiveCall, currentUser, onUserUpdate }) => {
+  ({ activeCall, setActiveCall, currentUser }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
     const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
@@ -70,6 +48,19 @@ export const ResponsiveLayout: FC<ResponsiveLayoutProps> = memo(
     const handleChatRoomSelect = (chatRoom: ChatRoom) => {
       setActiveChatRoom(chatRoom);
       setIsSidebarOpen(false);
+    };
+
+    const handleCall = (callData: any) => {
+      if (!currentUser) return;
+      
+      const call: Call = {
+        id: 'call-' + Date.now(),
+        participants: [currentUser, callData.contact],
+        type: callData.type,
+        status: 'connecting'
+      };
+      
+      setActiveCall(call);
     };
 
     return (
@@ -125,7 +116,7 @@ export const ResponsiveLayout: FC<ResponsiveLayoutProps> = memo(
 
           {/* Main Chat Area */}
           <div className="flex-1 lg:flex-1">
-            <ChatInterface onCall={setActiveCall} />
+            <ChatInterface onCall={handleCall} />
           </div>
 
           {/* Call Interface */}

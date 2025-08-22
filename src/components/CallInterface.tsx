@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
 
+interface Call {
+  id: string;
+  participants: any[];
+  type: 'audio' | 'video';
+  status: 'connecting' | 'connected' | 'ended';
+}
+
 interface CallInterfaceProps {
-  call: {
-    type: 'audio' | 'video';
-    contact: any;
-    status: 'calling' | 'connected' | 'ended';
-  };
+  call: Call;
   onEndCall: () => void;
-  onUpdateCall: (call: any) => void;
+  onUpdateCall: (call: Call) => void;
 }
 
 export function CallInterface({ call, onEndCall, onUpdateCall }: CallInterfaceProps) {
@@ -19,10 +22,12 @@ export function CallInterface({ call, onEndCall, onUpdateCall }: CallInterfacePr
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
+  const contact = call.participants.find(p => p.id !== 'current-user') || call.participants[0];
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
-    if (call.status === 'calling') {
+    if (call.status === 'connecting') {
       // Simulate call connection after 3 seconds
       const timeout = setTimeout(() => {
         onUpdateCall({ ...call, status: 'connected' });
@@ -108,19 +113,19 @@ export function CallInterface({ call, onEndCall, onUpdateCall }: CallInterfacePr
             <div className="text-center">
               <div className="w-32 h-32 mx-auto mb-6 relative">
                 <img
-                  src={call.contact.avatar}
-                  alt={call.contact.name}
+                  src={contact.avatar || 'https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=150'}
+                  alt={contact.name || 'Contact'}
                   className="w-full h-full rounded-full object-cover"
                 />
-                {call.status === 'calling' && (
+                {call.status === 'connecting' && (
                   <div className="absolute -inset-4 border-4 border-white/30 rounded-full animate-ping" />
                 )}
               </div>
               <h2 className="text-2xl font-semibold text-white mb-2">
-                {call.contact.name}
+                {contact.name || 'Unknown Contact'}
               </h2>
               <p className="text-white/70 text-lg">
-                {call.status === 'calling' 
+                {call.status === 'connecting' 
                   ? `${call.type === 'video' ? 'Video' : 'Audio'} calling...`
                   : formatDuration(callDuration)
                 }

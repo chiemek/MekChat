@@ -30,20 +30,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     try {
       if (isLogin) {
-        const credentials: LoginCredentials = {
-          email: formData.email,
-          password: formData.password
-        };
-        await authService.login(credentials);
+        await authService.login(formData.email, formData.password);
       } else {
-        const registerData: RegisterData = {
-          email: formData.email,
-          password: formData.password,
-          username: formData.username,
-          displayName: formData.displayName,
-          phone: formData.phone
-        };
-        await authService.register(registerData);
+        await authService.register(formData.email, formData.password, formData.displayName);
       }
       onSuccess();
       onClose();

@@ -1,9 +1,5 @@
-// Simulated real-time chat service
-
-import { getDatabase, ref, onValue, push, set } from "firebase/database";
-import { User } from "./authService";
-
-const db = getDatabase();
+// Mock chat service for demo purposes
+// In production, replace with Socket.IO, Firebase, or your preferred real-time service
 
 export interface ChatMessage {
   id: string;
@@ -26,7 +22,6 @@ export interface User {
   isTyping?: boolean;
 }
 
-// Add this interface to chatService.ts
 export interface ChatRoom {
   id: string;
   name?: string;
@@ -71,39 +66,6 @@ class ChatService {
     },
   ];
 
-  listenToChats(userId: string, callback: (chats: ChatRoom[]) => void) {
-    const chatsRef = ref(db, `chats/${userId}`);
-    return onValue(chatsRef, (snapshot) => {
-      const chats = snapshot.val() || {};
-      callback(Object.values(chats));
-    });
-  }
-
-  async sendMessage(
-    chatId: string,
-    message: Omit<ChatMessage, "id" | "timestamp">
-  ) {
-    const messageRef = ref(db, `messages/${chatId}`);
-    const newMessage = {
-      ...message,
-      id: push(messageRef).key,
-      timestamp: new Date().toISOString(),
-    };
-    await set(ref(db, `messages/${chatId}/${newMessage.id}`), newMessage);
-    return newMessage;
-  }
-
-  listenToMessages(
-    chatId: string,
-    callback: (messages: ChatMessage[]) => void
-  ) {
-    const messagesRef = ref(db, `messages/${chatId}`);
-    return onValue(messagesRef, (snapshot) => {
-      const messages = snapshot.val() || {};
-      callback(Object.values(messages));
-    });
-  }
-
   private currentUserId = "currentUser"; // Move this to the top
   private chatRooms: ChatRoom[] = [
     {
@@ -120,7 +82,6 @@ class ChatService {
           status: "online",
         },
       ],
-      lastMessage: this.messages[0],
       unreadCount: 0,
       createdAt: new Date(),
     },
@@ -129,14 +90,14 @@ class ChatService {
       name: "Project Team",
       type: "group",
       participants: [this.users[0], this.users[1], this.users[2]],
-      lastMessage: this.messages[1],
       unreadCount: 2,
       createdAt: new Date(),
     },
   ];
 
-  // Add these methods to the ChatService class
-  getChatRooms(): ChatRoom[] {
+  async getChatRooms(): Promise<ChatRoom[]> {
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 500));
     return this.chatRooms;
   }
 
@@ -184,6 +145,10 @@ class ChatService {
         status: "read",
       },
     ];
+
+    // Update chat rooms with initial messages
+    this.chatRooms[0].lastMessage = this.messages[1];
+    this.chatRooms[1].lastMessage = this.messages[0];
 
     // Simulate random incoming messages
     this.startMessageSimulation();

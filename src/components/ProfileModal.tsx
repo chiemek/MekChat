@@ -25,8 +25,7 @@ export function ProfileModal({ isOpen, onClose, user, onUserUpdate }: ProfileMod
   const handleSave = async () => {
     setIsLoading(true);
     try {
-      const updatedUser = await authService.updateProfile(formData);
-      onUserUpdate(updatedUser);
+      await authService.updateProfile(formData);
       setIsEditing(false);
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -42,8 +41,7 @@ export function ProfileModal({ isOpen, onClose, user, onUserUpdate }: ProfileMod
     setIsLoading(true);
     try {
       const result = await cloudinaryService.uploadImage(file);
-      const updatedUser = await authService.updateProfile({ avatar: result.secure_url });
-      onUserUpdate(updatedUser);
+      await authService.updateProfile({ avatar: result.secure_url });
     } catch (error) {
       console.error('Failed to update avatar:', error);
     } finally {
