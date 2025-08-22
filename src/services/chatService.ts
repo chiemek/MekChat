@@ -1,16 +1,32 @@
-// Mock chat service for demo purposes
-// In production, replace with Socket.IO, Firebase, or your preferred real-time service
+import { 
+  collection, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  serverTimestamp,
+  getDocs,
+  getDoc,
+  Timestamp
+} from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
 
 export interface ChatMessage {
   id: string;
   type: "text" | "voice" | "image" | "video";
   content: string;
   timestamp: Date;
-  sender: string;
-  recipient: string;
+  senderId: string;
+  recipientId: string;
+  conversationId: string;
   duration?: number;
   fileName?: string;
   status: "sending" | "sent" | "delivered" | "read";
+  reactions?: { [userId: string]: string };
 }
 
 export interface User {
@@ -20,6 +36,17 @@ export interface User {
   status: "online" | "offline" | "away";
   lastSeen?: Date;
   isTyping?: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  participants: string[];
+  type: "direct" | "group";
+  name?: string;
+  lastMessage?: ChatMessage;
+  lastMessageAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ChatRoom {
@@ -33,340 +60,268 @@ export interface ChatRoom {
 }
 
 class ChatService {
-  private messages: ChatMessage[] = [];
-  private users: User[] = [
-    {
-      id: "user1",
-      name: "Alex Johnson",
-      avatar:
-        "https://images.pexels.com/photos/1681010/pexels-photo-1681010.jpeg?auto=compress&cs=tinysrgb&w=150",
-      status: "online",
-    },
-    {
-      id: "user2",
-      name: "Sarah Chen",
-      avatar:
-        "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=150",
-      status: "away",
-    },
-    {
-      id: "user3",
-      name: "Mike Rodriguez",
-      avatar:
-        "https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=150",
-      status: "offline",
-      lastSeen: new Date(Date.now() - 1800000),
-    },
-    {
-      id: "user4",
-      name: "Emma Watson",
-      avatar:
-        "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150",
-      status: "online",
-    },
-  ];
+  private messageListeners: ((messages: ChatMessage[]) => void)[] = [];
+  private conversationListeners: ((conversations: Conversation[]) => void)[] = [];
+  private unsubscribes: (() => void)[] = [];
 
-  private currentUserId = "currentUser"; // Move this to the top
-  private chatRooms: ChatRoom[] = [
-    {
-      id: "room1",
-      name: "Direct Message",
-      type: "direct",
-      participants: [
-        this.users[0],
-        {
-          id: this.currentUserId,
-          name: "Current User",
-          avatar:
-            "https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?auto=compress&cs=tinysrgb&w=150",
-          status: "online",
-        },
-      ],
-      unreadCount: 0,
-      createdAt: new Date(),
-    },
-    {
-      id: "room2",
-      name: "Project Team",
-      type: "group",
-      participants: [this.users[0], this.users[1], this.users[2]],
-      unreadCount: 2,
-      createdAt: new Date(),
-    },
-  ];
+  // CREATE - Send a new message
+  async sendMessage(messageData: {
+    type: ChatMessage['type'];
+    content: string;
+    recipientId: string;
+    conversationId?: string;
+    duration?: number;
+    fileName?: string;
+  }): Promise<ChatMessage> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('User not authenticated');
 
-  async getChatRooms(): Promise<ChatRoom[]> {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return this.chatRooms;
-  }
+    try {
+      let conversationId = messageData.conversationId;
 
-  updateChatRoomLastMessage(roomId: string, message: ChatMessage) {
-    this.chatRooms = this.chatRooms.map((room) =>
-      room.id === roomId ? { ...room, lastMessage: message } : room
-    );
-  }
+      // Create conversation if it doesn't exist
+      if (!conversationId) {
+        conversationId = await this.createOrGetConversation([currentUser.uid, messageData.recipientId]);
+      }
 
-  incrementUnreadCount(roomId: string) {
-    this.chatRooms = this.chatRooms.map((room) =>
-      room.id === roomId ? { ...room, unreadCount: room.unreadCount + 1 } : room
-    );
-  }
+      const message = {
+        type: messageData.type,
+        content: messageData.content,
+        senderId: currentUser.uid,
+        recipientId: messageData.recipientId,
+        conversationId,
+        duration: messageData.duration,
+        fileName: messageData.fileName,
+        status: 'sent' as const,
+        timestamp: serverTimestamp(),
+        reactions: {}
+      };
 
-  resetUnreadCount(roomId: string) {
-    this.chatRooms = this.chatRooms.map((room) =>
-      room.id === roomId ? { ...room, unreadCount: 0 } : room
-    );
-  }
+      const docRef = await addDoc(collection(db, 'messages'), message);
 
-  private listeners: ((messages: ChatMessage[]) => void)[] = [];
-  private userListeners: ((users: User[]) => void)[] = [];
-  private typingListeners: ((userId: string, isTyping: boolean) => void)[] = [];
+      // Update conversation's last message
+      await this.updateConversationLastMessage(conversationId, {
+        id: docRef.id,
+        ...message,
+        timestamp: new Date()
+      } as ChatMessage);
 
-  constructor() {
-    // Initialize with some demo messages
-    this.messages = [
-      {
-        id: "1",
-        type: "text",
-        content: "Hey! How are you doing?",
-        timestamp: new Date(Date.now() - 3600000),
-        sender: "user1",
-        recipient: this.currentUserId,
-        status: "read",
-      },
-      {
-        id: "2",
-        type: "text",
-        content: "I'm doing great! Just working on some cool projects.",
-        timestamp: new Date(Date.now() - 3000000),
-        sender: this.currentUserId,
-        recipient: "user1",
-        status: "read",
-      },
-    ];
-
-    // Update chat rooms with initial messages
-    this.chatRooms[0].lastMessage = this.messages[1];
-    this.chatRooms[1].lastMessage = this.messages[0];
-
-    // Simulate random incoming messages
-    this.startMessageSimulation();
-  }
-
-  // Subscribe to message updates
-  onMessagesUpdate(callback: (messages: ChatMessage[]) => void) {
-    this.listeners.push(callback);
-    callback(this.messages);
-
-    return () => {
-      this.listeners = this.listeners.filter(
-        (listener) => listener !== callback
-      );
-    };
-  }
-
-  // Subscribe to user updates
-  onUsersUpdate(callback: (users: User[]) => void) {
-    this.userListeners.push(callback);
-    callback(this.users);
-
-    return () => {
-      this.userListeners = this.userListeners.filter(
-        (listener) => listener !== callback
-      );
-    };
-  }
-
-  // Subscribe to typing indicators
-  onTypingUpdate(callback: (userId: string, isTyping: boolean) => void) {
-    this.typingListeners.push(callback);
-
-    return () => {
-      this.typingListeners = this.typingListeners.filter(
-        (listener) => listener !== callback
-      );
-    };
-  }
-
-  // Send a message
-  async sendMessage(
-    message: Omit<ChatMessage, "id" | "timestamp" | "sender" | "status">
-  ) {
-    const newMessage: ChatMessage = {
-      ...message,
-      id: Date.now().toString(),
-      timestamp: new Date(),
-      sender: this.currentUserId,
-      status: "sending",
-    };
-
-    this.messages.push(newMessage);
-    this.notifyListeners();
-
-    // Simulate network delay and status updates
-    await this.simulateMessageDelivery(newMessage.id);
-
-    // Simulate response from recipient (30% chance)
-    if (Math.random() < 0.3) {
-      setTimeout(() => {
-        this.simulateIncomingMessage(message.recipient);
-      }, 2000 + Math.random() * 3000);
+      return {
+        id: docRef.id,
+        ...message,
+        timestamp: new Date()
+      } as ChatMessage;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      throw error;
     }
   }
 
-  // Get messages for a specific conversation
-  getConversationMessages(userId: string): ChatMessage[] {
-    return this.messages.filter(
-      (msg) =>
-        (msg.sender === this.currentUserId && msg.recipient === userId) ||
-        (msg.sender === userId && msg.recipient === this.currentUserId)
+  // READ - Get messages for a conversation
+  subscribeToMessages(conversationId: string, callback: (messages: ChatMessage[]) => void) {
+    const q = query(
+      collection(db, 'messages'),
+      where('conversationId', '==', conversationId),
+      orderBy('timestamp', 'asc')
     );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages: ChatMessage[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        messages.push({
+          id: doc.id,
+          ...data,
+          timestamp: data.timestamp?.toDate() || new Date()
+        } as ChatMessage);
+      });
+      callback(messages);
+    });
+
+    this.unsubscribes.push(unsubscribe);
+    return unsubscribe;
   }
 
-  // Get all users
-  getUsers(): User[] {
-    return this.users;
-  }
-
-  // Update user status
-  updateUserStatus(userId: string, status: User["status"]) {
-    this.users = this.users.map((user) =>
-      user.id === userId
-        ? {
-            ...user,
-            status,
-            lastSeen: status === "offline" ? new Date() : undefined,
-          }
-        : user
-    );
-    this.notifyUserListeners();
-  }
-
-  // Set typing indicator
-  setTyping(recipientId: string, isTyping: boolean) {
-    this.typingListeners.forEach((listener) => listener(recipientId, isTyping));
-
-    // Simulate typing response (20% chance)
-    if (isTyping && Math.random() < 0.2) {
-      setTimeout(() => {
-        this.simulateTyping(recipientId);
-      }, 1000 + Math.random() * 2000);
-    }
-  }
-
-  private async simulateMessageDelivery(messageId: string) {
-    // Simulate sent status
-    setTimeout(() => {
-      this.updateMessageStatus(messageId, "sent");
-    }, 500 + Math.random() * 1000);
-
-    // Simulate delivered status
-    setTimeout(() => {
-      this.updateMessageStatus(messageId, "delivered");
-    }, 1000 + Math.random() * 2000);
-
-    // Simulate read status (70% chance)
-    if (Math.random() < 0.7) {
-      setTimeout(() => {
-        this.updateMessageStatus(messageId, "read");
-      }, 2000 + Math.random() * 5000);
-    }
-  }
-
-  private updateMessageStatus(
-    messageId: string,
-    status: ChatMessage["status"]
-  ) {
-    this.messages = this.messages.map((msg) =>
-      msg.id === messageId ? { ...msg, status } : msg
-    );
-    this.notifyListeners();
-  }
-
-  private simulateIncomingMessage(fromUserId: string) {
-    const responses = [
-      "That's interesting!",
-      "Tell me more about that",
-      "Sounds great!",
-      "I agree with you",
-      "That's awesome!",
-      "Really? That's cool!",
-      "I see what you mean",
-      "Thanks for sharing!",
-    ];
-
-    const randomResponse =
-      responses[Math.floor(Math.random() * responses.length)];
-
-    const incomingMessage: ChatMessage = {
-      id: Date.now().toString(),
-      type: "text",
-      content: randomResponse,
-      timestamp: new Date(),
-      sender: fromUserId,
-      recipient: this.currentUserId,
-      status: "sent",
-    };
-
-    this.messages.push(incomingMessage);
-    this.notifyListeners();
-
-    // Mark as delivered and read after a short delay
-    setTimeout(() => {
-      this.updateMessageStatus(incomingMessage.id, "delivered");
-      setTimeout(() => {
-        this.updateMessageStatus(incomingMessage.id, "read");
-      }, 1000);
-    }, 500);
-  }
-
-  private simulateTyping(userId: string) {
-    this.users = this.users.map((user) =>
-      user.id === userId ? { ...user, isTyping: true } : user
-    );
-    this.notifyUserListeners();
-
-    setTimeout(() => {
-      this.users = this.users.map((user) =>
-        user.id === userId ? { ...user, isTyping: false } : user
+  // CREATE/READ - Create or get existing conversation
+  async createOrGetConversation(participantIds: string[]): Promise<string> {
+    try {
+      // Check if conversation already exists
+      const q = query(
+        collection(db, 'conversations'),
+        where('participants', 'array-contains-any', participantIds)
       );
-      this.notifyUserListeners();
-    }, 2000 + Math.random() * 3000);
-  }
 
-  private startMessageSimulation() {
-    // Randomly update user statuses
-    setInterval(() => {
-      const randomUser =
-        this.users[Math.floor(Math.random() * this.users.length)];
-      const statuses: User["status"][] = ["online", "away", "offline"];
-      const newStatus = statuses[Math.floor(Math.random() * statuses.length)];
-      this.updateUserStatus(randomUser.id, newStatus);
-    }, 30000); // Every 30 seconds
-
-    // Occasionally send random messages
-    setInterval(() => {
-      if (Math.random() < 0.1) {
-        // 10% chance every 10 seconds
-        const onlineUsers = this.users.filter(
-          (user) => user.status === "online"
-        );
-        if (onlineUsers.length > 0) {
-          const randomUser =
-            onlineUsers[Math.floor(Math.random() * onlineUsers.length)];
-          this.simulateIncomingMessage(randomUser.id);
+      const querySnapshot = await getDocs(q);
+      
+      // Find exact match
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        if (data.participants.length === participantIds.length &&
+            participantIds.every(id => data.participants.includes(id))) {
+          return doc.id;
         }
       }
-    }, 10000);
+
+      // Create new conversation
+      const conversationData = {
+        participants: participantIds,
+        type: participantIds.length === 2 ? 'direct' : 'group',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      const docRef = await addDoc(collection(db, 'conversations'), conversationData);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error creating/getting conversation:', error);
+      throw error;
+    }
   }
 
-  private notifyListeners() {
-    this.listeners.forEach((listener) => listener([...this.messages]));
+  // READ - Get user's conversations
+  async getChatRooms(): Promise<ChatRoom[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return [];
+
+    try {
+      const q = query(
+        collection(db, 'conversations'),
+        where('participants', 'array-contains', currentUser.uid),
+        orderBy('updatedAt', 'desc')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const chatRooms: ChatRoom[] = [];
+
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        
+        // Get participant details
+        const participants: User[] = [];
+        for (const participantId of data.participants) {
+          if (participantId !== currentUser.uid) {
+            const userDoc = await getDoc(doc(db, 'users', participantId));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              participants.push({
+                id: participantId,
+                name: userData.displayName || userData.username,
+                avatar: userData.avatar || '',
+                status: userData.status || 'offline',
+                lastSeen: userData.lastSeen?.toDate()
+              });
+            }
+          }
+        }
+
+        chatRooms.push({
+          id: doc.id,
+          name: data.name,
+          type: data.type,
+          participants,
+          lastMessage: data.lastMessage,
+          unreadCount: 0, // TODO: Implement unread count logic
+          createdAt: data.createdAt?.toDate() || new Date()
+        });
+      }
+
+      return chatRooms;
+    } catch (error) {
+      console.error('Error fetching chat rooms:', error);
+      return [];
+    }
   }
 
-  private notifyUserListeners() {
-    this.userListeners.forEach((listener) => listener([...this.users]));
+  // UPDATE - Update message status
+  async updateMessageStatus(messageId: string, status: ChatMessage['status']): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'messages', messageId), {
+        status,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error updating message status:', error);
+    }
+  }
+
+  // UPDATE - Add reaction to message
+  async addReaction(messageId: string, reaction: string): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    try {
+      const messageDoc = await getDoc(doc(db, 'messages', messageId));
+      if (messageDoc.exists()) {
+        const data = messageDoc.data();
+        const reactions = data.reactions || {};
+        reactions[currentUser.uid] = reaction;
+
+        await updateDoc(doc(db, 'messages', messageId), {
+          reactions,
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      console.error('Error adding reaction:', error);
+    }
+  }
+
+  // DELETE - Delete message
+  async deleteMessage(messageId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'messages', messageId));
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      throw error;
+    }
+  }
+
+  // UPDATE - Update conversation's last message
+  private async updateConversationLastMessage(conversationId: string, message: ChatMessage): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'conversations', conversationId), {
+        lastMessage: {
+          id: message.id,
+          type: message.type,
+          content: message.content,
+          senderId: message.senderId,
+          timestamp: message.timestamp
+        },
+        lastMessageAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error updating conversation last message:', error);
+    }
+  }
+
+  // Cleanup subscriptions
+  cleanup() {
+    this.unsubscribes.forEach(unsubscribe => unsubscribe());
+    this.unsubscribes = [];
+  }
+
+  // Legacy methods for compatibility
+  onMessagesUpdate(callback: (messages: ChatMessage[]) => void) {
+    this.messageListeners.push(callback);
+    return () => {
+      this.messageListeners = this.messageListeners.filter(listener => listener !== callback);
+    };
+  }
+
+  onUsersUpdate(callback: (users: User[]) => void) {
+    // TODO: Implement real-time user updates
+    callback([]);
+    return () => {};
+  }
+
+  onTypingUpdate(callback: (userId: string, isTyping: boolean) => void) {
+    // TODO: Implement typing indicators
+    return () => {};
+  }
+
+  setTyping(recipientId: string, isTyping: boolean) {
+    // TODO: Implement typing indicators
   }
 }
 
