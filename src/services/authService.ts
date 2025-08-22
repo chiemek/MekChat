@@ -4,6 +4,7 @@ import {
   signOut, 
   onAuthStateChanged,
   updateProfile,
+  deleteUser,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -12,7 +13,13 @@ import {
   getDoc, 
   updateDoc, 
   deleteDoc,
-  serverTimestamp 
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
@@ -61,6 +68,15 @@ class AuthService {
   // CREATE - Register new user
   async register(email: string, password: string, displayName: string): Promise<User> {
     try {
+      // Generate username from email
+      const username = email.split('@')[0] + '_' + Date.now();
+      
+      // Check if username already exists
+      const usernameExists = await this.checkUsernameExists(username);
+      if (usernameExists) {
+        throw new Error('Username already exists');
+      }
+
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
@@ -70,7 +86,7 @@ class AuthService {
       // Create user document in Firestore
       const userData: Omit<User, 'id'> = {
         email: firebaseUser.email!,
-        username: email.split('@')[0],
+        username,
         displayName,
         avatar: firebaseUser.photoURL || undefined,
         status: 'online',
@@ -85,9 +101,9 @@ class AuthService {
       });
 
       return { id: firebaseUser.uid, ...userData };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Registration error:', error);
-      throw error;
+      throw new Error(error.message || 'Registration failed');
     }
   }
 
@@ -97,17 +113,21 @@ class AuthService {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = await this.getUserProfile(userCredential.user.uid);
       
+      if (!user) {
+        throw new Error('User profile not found');
+      }
+      
       // Update user status to online
       await this.updateUserStatus(userCredential.user.uid, 'online');
       
-      return user!;
-    } catch (error) {
+      return user;
+    } catch (error: any) {
       console.error('Login error:', error);
-      throw error;
+      throw new Error(error.message || 'Login failed');
     }
   }
 
-  // READ - Get user profile
+  // READ - Get user profile by ID
   async getUserProfile(userId: string): Promise<User | null> {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
@@ -125,6 +145,101 @@ class AuthService {
     } catch (error) {
       console.error('Error fetching user profile:', error);
       return null;
+    }
+  }
+
+  // READ - Get all users (for contacts)
+  async getAllUsers(limitCount: number = 50): Promise<User[]> {
+    try {
+      const usersQuery = query(
+        collection(db, 'users'),
+        orderBy('displayName'),
+        limit(limitCount)
+      );
+      const querySnapshot = await getDocs(usersQuery);
+      
+      const users: User[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        users.push({
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          lastSeen: data.lastSeen?.toDate()
+        } as User);
+      });
+      
+      return users;
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return [];
+    }
+  }
+
+  // READ - Search users by username or display name
+  async searchUsers(searchTerm: string): Promise<User[]> {
+    try {
+      const searchTermLower = searchTerm.toLowerCase();
+      
+      // Search by username
+      const usernameQuery = query(
+        collection(db, 'users'),
+        where('username', '>=', searchTermLower),
+        where('username', '<=', searchTermLower + '\uf8ff'),
+        limit(20)
+      );
+      
+      // Search by display name
+      const displayNameQuery = query(
+        collection(db, 'users'),
+        where('displayName', '>=', searchTerm),
+        where('displayName', '<=', searchTerm + '\uf8ff'),
+        limit(20)
+      );
+      
+      const [usernameSnapshot, displayNameSnapshot] = await Promise.all([
+        getDocs(usernameQuery),
+        getDocs(displayNameQuery)
+      ]);
+      
+      const users: User[] = [];
+      const userIds = new Set<string>();
+      
+      // Process username results
+      usernameSnapshot.forEach((doc) => {
+        if (!userIds.has(doc.id)) {
+          userIds.add(doc.id);
+          const data = doc.data();
+          users.push({
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+            lastSeen: data.lastSeen?.toDate()
+          } as User);
+        }
+      });
+      
+      // Process display name results
+      displayNameSnapshot.forEach((doc) => {
+        if (!userIds.has(doc.id)) {
+          userIds.add(doc.id);
+          const data = doc.data();
+          users.push({
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+            lastSeen: data.lastSeen?.toDate()
+          } as User);
+        }
+      });
+      
+      return users;
+    } catch (error) {
+      console.error('Error searching users:', error);
+      return [];
     }
   }
 
@@ -154,10 +269,12 @@ class AuthService {
 
       // Return updated user profile
       const updatedUser = await this.getUserProfile(currentUser.uid);
-      return updatedUser!;
-    } catch (error) {
+      if (!updatedUser) throw new Error('Failed to fetch updated profile');
+      
+      return updatedUser;
+    } catch (error: any) {
       console.error('Error updating profile:', error);
-      throw error;
+      throw new Error(error.message || 'Failed to update profile');
     }
   }
 
@@ -189,10 +306,25 @@ class AuthService {
       await deleteDoc(doc(db, 'users', currentUser.uid));
       
       // Delete Firebase Auth user
-      await currentUser.delete();
-    } catch (error) {
+      await deleteUser(currentUser);
+    } catch (error: any) {
       console.error('Error deleting account:', error);
-      throw error;
+      throw new Error(error.message || 'Failed to delete account');
+    }
+  }
+
+  // Helper - Check if username exists
+  private async checkUsernameExists(username: string): Promise<boolean> {
+    try {
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('username', '==', username)
+      );
+      const querySnapshot = await getDocs(usersQuery);
+      return !querySnapshot.empty;
+    } catch (error) {
+      console.error('Error checking username:', error);
+      return false;
     }
   }
 

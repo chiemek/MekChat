@@ -1,3 +1,20 @@
+import { 
+  collection, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  serverTimestamp,
+  getDocs,
+  getDoc,
+  limit
+} from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
+
 export interface Contact {
   id: string;
   userId: string;
@@ -10,78 +27,337 @@ export interface Contact {
   lastSeen?: Date;
   isTyping?: boolean;
   addedAt: Date;
+  updatedAt: Date;
+  isFavorite?: boolean;
+  isBlocked?: boolean;
+  customName?: string; // Custom name set by user
+  notes?: string;
 }
 
 export interface ContactRequest {
   displayName: string;
   phone?: string;
   email?: string;
+  customName?: string;
+  notes?: string;
 }
 
 class ContactService {
-  private contacts: Contact[] = [];
   private contactListeners: ((contacts: Contact[]) => void)[] = [];
+  private unsubscribes: (() => void)[] = [];
 
-  constructor() {
-    // Initialize with some demo contacts
-    this.contacts = [
-      {
-        id: 'contact-1',
-        userId: 'current-user',
-        contactUserId: 'user1',
-        displayName: 'Alex Johnson',
-        avatar: 'https://images.pexels.com/photos/1681010/pexels-photo-1681010.jpeg?auto=compress&cs=tinysrgb&w=150',
-        email: 'alex@example.com',
-        phone: '+1234567890',
-        status: 'online',
-        addedAt: new Date(Date.now() - 86400000)
-      },
-      {
-        id: 'contact-2',
-        userId: 'current-user',
-        contactUserId: 'user2',
-        displayName: 'Sarah Chen',
-        avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=150',
-        email: 'sarah@example.com',
-        status: 'away',
-        addedAt: new Date(Date.now() - 172800000)
-      },
-      {
-        id: 'contact-3',
-        userId: 'current-user',
-        contactUserId: 'user3',
-        displayName: 'Mike Rodriguez',
-        avatar: 'https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=150',
-        email: 'mike@example.com',
-        status: 'offline',
-        lastSeen: new Date(Date.now() - 1800000),
-        addedAt: new Date(Date.now() - 259200000)
-      }
-    ];
-  }
-
+  // CREATE - Add a new contact
   async addContact(contactData: ContactRequest): Promise<Contact> {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const newContact: Contact = {
-      id: 'contact-' + Date.now(),
-      userId: 'current-user',
-      contactUserId: 'user-' + Date.now(),
-      displayName: contactData.displayName,
-      phone: contactData.phone,
-      email: contactData.email,
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150',
-      status: 'offline',
-      addedAt: new Date()
-    };
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('User not authenticated');
 
-    this.contacts.push(newContact);
-    this.notifyContactListeners();
-    return newContact;
+    try {
+      // First, try to find user by email or phone
+      let contactUserId: string | null = null;
+      
+      if (contactData.email) {
+        const userQuery = query(
+          collection(db, 'users'),
+          where('email', '==', contactData.email),
+          limit(1)
+        );
+        const userSnapshot = await getDocs(userQuery);
+        if (!userSnapshot.empty) {
+          contactUserId = userSnapshot.docs[0].id;
+        }
+      }
+
+      if (!contactUserId && contactData.phone) {
+        const userQuery = query(
+          collection(db, 'users'),
+          where('phone', '==', contactData.phone),
+          limit(1)
+        );
+        const userSnapshot = await getDocs(userQuery);
+        if (!userSnapshot.empty) {
+          contactUserId = userSnapshot.docs[0].id;
+        }
+      }
+
+      // Check if contact already exists
+      if (contactUserId) {
+        const existingContactQuery = query(
+          collection(db, 'contacts'),
+          where('userId', '==', currentUser.uid),
+          where('contactUserId', '==', contactUserId)
+        );
+        const existingSnapshot = await getDocs(existingContactQuery);
+        if (!existingSnapshot.empty) {
+          throw new Error('Contact already exists');
+        }
+      }
+
+      const newContact = {
+        userId: currentUser.uid,
+        contactUserId: contactUserId || 'pending',
+        displayName: contactData.displayName,
+        phone: contactData.phone,
+        email: contactData.email,
+        customName: contactData.customName,
+        notes: contactData.notes,
+        status: 'offline' as const,
+        isFavorite: false,
+        isBlocked: false,
+        addedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      const docRef = await addDoc(collection(db, 'contacts'), newContact);
+
+      return {
+        id: docRef.id,
+        ...newContact,
+        addedAt: new Date(),
+        updatedAt: new Date()
+      } as Contact;
+    } catch (error) {
+      console.error('Error adding contact:', error);
+      throw error;
+    }
   }
 
+  // READ - Get all contacts for current user
+  async getContacts(): Promise<Contact[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return [];
+
+    try {
+      const q = query(
+        collection(db, 'contacts'),
+        where('userId', '==', currentUser.uid),
+        where('isBlocked', '!=', true),
+        orderBy('displayName')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const contacts: Contact[] = [];
+
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        
+        // Get real-time user status if contact is registered
+        let userStatus = 'offline';
+        let avatar = '';
+        let lastSeen: Date | undefined;
+
+        if (data.contactUserId && data.contactUserId !== 'pending') {
+          const userDoc = await getDoc(doc(db, 'users', data.contactUserId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            userStatus = userData.status || 'offline';
+            avatar = userData.avatar || '';
+            lastSeen = userData.lastSeen?.toDate();
+          }
+        }
+
+        contacts.push({
+          id: doc.id,
+          ...data,
+          status: userStatus,
+          avatar,
+          lastSeen,
+          addedAt: data.addedAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date()
+        } as Contact);
+      }
+
+      return contacts;
+    } catch (error) {
+      console.error('Error fetching contacts:', error);
+      return [];
+    }
+  }
+
+  // READ - Search contacts
+  async searchContacts(searchTerm: string): Promise<Contact[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return [];
+
+    try {
+      const searchTermLower = searchTerm.toLowerCase();
+      
+      const q = query(
+        collection(db, 'contacts'),
+        where('userId', '==', currentUser.uid),
+        where('isBlocked', '!=', true)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const contacts: Contact[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const displayName = (data.customName || data.displayName || '').toLowerCase();
+        const email = (data.email || '').toLowerCase();
+        const phone = (data.phone || '').toLowerCase();
+
+        if (displayName.includes(searchTermLower) || 
+            email.includes(searchTermLower) || 
+            phone.includes(searchTermLower)) {
+          contacts.push({
+            id: doc.id,
+            ...data,
+            addedAt: data.addedAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date()
+          } as Contact);
+        }
+      });
+
+      return contacts;
+    } catch (error) {
+      console.error('Error searching contacts:', error);
+      return [];
+    }
+  }
+
+  // READ - Get favorite contacts
+  async getFavoriteContacts(): Promise<Contact[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return [];
+
+    try {
+      const q = query(
+        collection(db, 'contacts'),
+        where('userId', '==', currentUser.uid),
+        where('isFavorite', '==', true),
+        where('isBlocked', '!=', true),
+        orderBy('displayName')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const contacts: Contact[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        contacts.push({
+          id: doc.id,
+          ...data,
+          addedAt: data.addedAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date()
+        } as Contact);
+      });
+
+      return contacts;
+    } catch (error) {
+      console.error('Error fetching favorite contacts:', error);
+      return [];
+    }
+  }
+
+  // UPDATE - Update contact
+  async updateContact(contactId: string, updates: Partial<Contact>): Promise<Contact> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('User not authenticated');
+
+    try {
+      // Verify ownership
+      const contactDoc = await getDoc(doc(db, 'contacts', contactId));
+      if (!contactDoc.exists()) {
+        throw new Error('Contact not found');
+      }
+
+      const contactData = contactDoc.data();
+      if (contactData.userId !== currentUser.uid) {
+        throw new Error('You can only update your own contacts');
+      }
+
+      const updateData = {
+        ...updates,
+        updatedAt: serverTimestamp()
+      };
+      delete updateData.id;
+      delete updateData.addedAt;
+
+      await updateDoc(doc(db, 'contacts', contactId), updateData);
+
+      // Return updated contact
+      const updatedDoc = await getDoc(doc(db, 'contacts', contactId));
+      const updatedData = updatedDoc.data()!;
+      
+      return {
+        id: contactId,
+        ...updatedData,
+        addedAt: updatedData.addedAt?.toDate() || new Date(),
+        updatedAt: updatedData.updatedAt?.toDate() || new Date()
+      } as Contact;
+    } catch (error) {
+      console.error('Error updating contact:', error);
+      throw error;
+    }
+  }
+
+  // UPDATE - Toggle favorite status
+  async toggleFavorite(contactId: string): Promise<void> {
+    try {
+      const contactDoc = await getDoc(doc(db, 'contacts', contactId));
+      if (!contactDoc.exists()) {
+        throw new Error('Contact not found');
+      }
+
+      const currentStatus = contactDoc.data().isFavorite || false;
+      await updateDoc(doc(db, 'contacts', contactId), {
+        isFavorite: !currentStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      throw error;
+    }
+  }
+
+  // UPDATE - Block/unblock contact
+  async toggleBlock(contactId: string): Promise<void> {
+    try {
+      const contactDoc = await getDoc(doc(db, 'contacts', contactId));
+      if (!contactDoc.exists()) {
+        throw new Error('Contact not found');
+      }
+
+      const currentStatus = contactDoc.data().isBlocked || false;
+      await updateDoc(doc(db, 'contacts', contactId), {
+        isBlocked: !currentStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error toggling block status:', error);
+      throw error;
+    }
+  }
+
+  // DELETE - Delete contact
+  async deleteContact(contactId: string): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('User not authenticated');
+
+    try {
+      // Verify ownership
+      const contactDoc = await getDoc(doc(db, 'contacts', contactId));
+      if (!contactDoc.exists()) {
+        throw new Error('Contact not found');
+      }
+
+      const contactData = contactDoc.data();
+      if (contactData.userId !== currentUser.uid) {
+        throw new Error('You can only delete your own contacts');
+      }
+
+      await deleteDoc(doc(db, 'contacts', contactId));
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+      throw error;
+    }
+  }
+
+  // CREATE - Import contacts from phone (mock implementation)
   async importFromPhoneContacts(): Promise<Contact[]> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('User not authenticated');
+
     // Simulate phone contact import
     await new Promise(resolve => setTimeout(resolve, 2000));
     
@@ -94,59 +370,76 @@ class ContactService {
     const importedContacts: Contact[] = [];
     
     for (const contact of phoneContacts) {
-      const newContact: Contact = {
-        id: 'imported-' + Date.now() + Math.random(),
-        userId: 'current-user',
-        contactUserId: 'imported-user-' + Date.now() + Math.random(),
-        displayName: contact.displayName,
-        phone: contact.phone,
-        email: contact.email,
-        avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150',
-        status: Math.random() > 0.5 ? 'online' : 'offline',
-        addedAt: new Date()
-      };
-      
-      importedContacts.push(newContact);
-      this.contacts.push(newContact);
+      try {
+        const newContact = await this.addContact(contact);
+        importedContacts.push(newContact);
+      } catch (error) {
+        console.warn(`Failed to import contact ${contact.displayName}:`, error);
+      }
     }
 
-    this.notifyContactListeners();
     return importedContacts;
   }
 
-  async updateContact(contactId: string, updates: Partial<Contact>): Promise<Contact> {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const contactIndex = this.contacts.findIndex(c => c.id === contactId);
-    if (contactIndex === -1) throw new Error('Contact not found');
-    
-    this.contacts[contactIndex] = { ...this.contacts[contactIndex], ...updates };
-    this.notifyContactListeners();
-    return this.contacts[contactIndex];
+  // Real-time subscription to contacts
+  subscribeToContacts(callback: (contacts: Contact[]) => void) {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return () => {};
+
+    const q = query(
+      collection(db, 'contacts'),
+      where('userId', '==', currentUser.uid),
+      orderBy('displayName')
+    );
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const contacts: Contact[] = [];
+      
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        
+        // Get real-time user status if contact is registered
+        let userStatus = 'offline';
+        let avatar = '';
+        let lastSeen: Date | undefined;
+
+        if (data.contactUserId && data.contactUserId !== 'pending') {
+          const userDoc = await getDoc(doc(db, 'users', data.contactUserId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            userStatus = userData.status || 'offline';
+            avatar = userData.avatar || '';
+            lastSeen = userData.lastSeen?.toDate();
+          }
+        }
+
+        contacts.push({
+          id: doc.id,
+          ...data,
+          status: userStatus,
+          avatar,
+          lastSeen,
+          addedAt: data.addedAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date()
+        } as Contact);
+      }
+      
+      callback(contacts);
+    });
+
+    this.unsubscribes.push(unsubscribe);
+    return unsubscribe;
   }
 
-  async deleteContact(contactId: string): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    this.contacts = this.contacts.filter(c => c.id !== contactId);
-    this.notifyContactListeners();
-  }
-
-  getContacts(): Contact[] {
-    return this.contacts;
-  }
-
+  // Legacy method for compatibility
   onContactsUpdate(callback: (contacts: Contact[]) => void) {
-    this.contactListeners.push(callback);
-    callback(this.contacts);
-    
-    return () => {
-      this.contactListeners = this.contactListeners.filter(listener => listener !== callback);
-    };
+    return this.subscribeToContacts(callback);
   }
 
-  private notifyContactListeners() {
-    this.contactListeners.forEach(listener => listener([...this.contacts]));
+  // Cleanup subscriptions
+  cleanup() {
+    this.unsubscribes.forEach(unsubscribe => unsubscribe());
+    this.unsubscribes = [];
   }
 }
 
